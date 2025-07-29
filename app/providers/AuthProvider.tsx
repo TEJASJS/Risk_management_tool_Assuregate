@@ -27,6 +27,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             // consider adding a mechanism to re-fetch only if the existing profile is stale.
             // For now, we remove the duplicate fetch.
             // Fetch user profile
+            // trying to see if now login error resolved
             try {
               const { data: profile, error } = await supabase
                 .from('profiles')
