@@ -2,6 +2,7 @@
 
 import Papa from "papaparse";
 import * as XLSX from "xlsx";
+import ExcelJS from 'exceljs';
 import { useState, useEffect, useRef } from "react";
 import { useRiskData } from "@/store/useRiskData";
 import Search from "@/app/ui/search";
@@ -12,12 +13,190 @@ import supabase from "@/lib/supabaseClient";
 import { mapDbColumnsToCsvData } from "@/lib/headerMapping";
 import { sanitizeDataForSupabase, getColumnMapping } from "@/lib/columnSanitizer";
 import { useAuth } from "@/store/useAuth";
+import { Button } from "@/components/ui/button";
 
 const REQUIRED_HEADERS = [
-  "Sr#", "Business Process", "Date Risk Identified", "Risk Description", "Threats", "Vulnerabilities", "Existing Controls", "Risk Owner", "Controls / Clause No",
-  "ISO 27001: 2022 Controls Reference", "Confidentiality", "Integrity", "Availability", "Max CIA Value", "Vulnerability Rating", "Threat Frequency",
-  "Threat Impact", "Threat Value", "Risk Value", "Planned Mitigation Completion Date", "Risk Treatment Action", "Revised Vulnerability Rating",
-  "Revised Threat Frequency", "Revised Threat Impact", "Revised Threat Value", "Revised Risk Value", "Actual Mitigation Completion Date", "Risk Treatment Option"
+  "Sr#",
+  "Business Process",
+  "Date Risk Identified",
+  "Risk Description",
+  "Threats",
+  "Vulnerabilities",
+  "Existing Controls",
+  "Risk Owner",
+  "Controls / Clause No",
+  "ISO 27001: 2022 Controls Reference",
+  "Confidentiality",
+  "Integrity",
+  "Availability",
+  "Max CIA Value",
+  "Vulnerability Rating",
+  "Threat Frequency",
+  "Threat Impact",
+  "Threat Value",
+  "Risk Value",
+  "Planned Mitigation Completion Date",
+  "Risk Treatment Action",
+  "Revised Vulnerability Rating",
+  "Revised Threat Frequency",
+  "Revised Threat Impact",
+  "Revised Threat Value",
+  "Revised Risk Value",
+  "Actual Mitigation Completion Date",
+  "Risk Treatment Option",
+];
+
+const EXAMPLE_DATA = [
+  {
+    "Sr#": 1,
+    "Business Process": "Offboarding",
+    "Date Risk Identified": "",
+    "Risk Description": "Poor record management",
+    "Threats": "Lack of operating procedures and asset protection",
+    "Vulnerabilities": "Business disruption",
+    "Existing Controls": "Documented operating procedures, handling of assets",
+    "Risk Owner": "IT",
+    "Controls / Clause No": "A.5.19",
+    "ISO 27001: 2022 Controls Reference": "Information Security in Supplier Relationships",
+    "Confidentiality": 1,
+    "Integrity": 2,
+    "Availability": 4,
+    "Max CIA Value": 4,
+    "Vulnerability Rating": 1,
+    "Threat Frequency": 1,
+    "Threat Impact": 2,
+    "Threat Value": 2,
+    "Risk Value": 8,
+    "Planned Mitigation Completion Date": "",
+    "Risk Treatment Action": "",
+    "Revised Vulnerability Rating": "",
+    "Revised Threat Frequency": "",
+    "Revised Threat Impact": "",
+    "Revised Threat Value": "",
+    "Revised Risk Value": "",
+    "Actual Mitigation Completion Date": "",
+    "Risk Treatment Option": "Accept"
+  },
+  {
+    "Sr#": 2,
+    "Business Process": "Training",
+    "Date Risk Identified": "",
+    "Risk Description": "Insufficient skills in crisis",
+    "Threats": "Inadequate cross-training programs",
+    "Vulnerabilities": "Skill gaps hindering operational recovery",
+    "Existing Controls": "Cross-train employees for critical roles",
+    "Risk Owner": "HR",
+    "Controls / Clause No": "A.5.19",
+    "ISO 27001: 2022 Controls Reference": "Information Security in Supplier Relationships",
+    "Confidentiality": 1,
+    "Integrity": 2,
+    "Availability": 3,
+    "Max CIA Value": 3,
+    "Vulnerability Rating": 1,
+    "Threat Frequency": 1,
+    "Threat Impact": 2,
+    "Threat Value": 2,
+    "Risk Value": 6,
+    "Planned Mitigation Completion Date": "",
+    "Risk Treatment Action": "",
+    "Revised Vulnerability Rating": "",
+    "Revised Threat Frequency": "",
+    "Revised Threat Impact": "",
+    "Revised Threat Value": "",
+    "Revised Risk Value": "",
+    "Actual Mitigation Completion Date": "",
+    "Risk Treatment Option": "Accept"
+  },
+  {
+    "Sr#": 3,
+    "Business Process": "Operations",
+    "Date Risk Identified": "",
+    "Risk Description": "Equipment failure",
+    "Threats": "Lack of in-house support team",
+    "Vulnerabilities": "Business disruption due to equipment failure",
+    "Existing Controls": "Equipment maintenance",
+    "Risk Owner": "IT",
+    "Controls / Clause No": "A.5.29",
+    "ISO 27001: 2022 Controls Reference": "Information Security During Disruption",
+    "Confidentiality": 1,
+    "Integrity": 2,
+    "Availability": 4,
+    "Max CIA Value": 4,
+    "Vulnerability Rating": 1,
+    "Threat Frequency": 1,
+    "Threat Impact": 2,
+    "Threat Value": 2,
+    "Risk Value": 8,
+    "Planned Mitigation Completion Date": "",
+    "Risk Treatment Action": "",
+    "Revised Vulnerability Rating": "",
+    "Revised Threat Frequency": "",
+    "Revised Threat Impact": "",
+    "Revised Threat Value": "",
+    "Revised Risk Value": "",
+    "Actual Mitigation Completion Date": "",
+    "Risk Treatment Option": "Accept"
+  },
+  {
+    "Sr#": 4,
+    "Business Process": "Onboarding",
+    "Date Risk Identified": "",
+    "Risk Description": "Security misconfiguration",
+    "Threats": "Human error",
+    "Vulnerabilities": "Lack of access control validation",
+    "Existing Controls": "Implement role-based access controls and validation",
+    "Risk Owner": "IT",
+    "Controls / Clause No": "A.7.11",
+    "ISO 27001: 2022 Controls Reference": "Supporting Utilities",
+    "Confidentiality": 2,
+    "Integrity": 2,
+    "Availability": 2,
+    "Max CIA Value": 2,
+    "Vulnerability Rating": 2,
+    "Threat Frequency": 1,
+    "Threat Impact": 1,
+    "Threat Value": 1,
+    "Risk Value": 4,
+    "Planned Mitigation Completion Date": "",
+    "Risk Treatment Action": "",
+    "Revised Vulnerability Rating": "",
+    "Revised Threat Frequency": "",
+    "Revised Threat Impact": "",
+    "Revised Threat Value": "",
+    "Revised Risk Value": "",
+    "Actual Mitigation Completion Date": "",
+    "Risk Treatment Option": "Accept"
+  },
+  {
+    "Sr#": 5,
+    "Business Process": "Operations",
+    "Date Risk Identified": "",
+    "Risk Description": "Data breach through removable media or insecure channels",
+    "Threats": "Data theft/leakage",
+    "Vulnerabilities": "Lack of USB/email/information exchange controls",
+    "Existing Controls": "Information transfer policies and procedures",
+    "Risk Owner": "IT",
+    "Controls / Clause No": "A.5.19",
+    "ISO 27001: 2022 Controls Reference": "Information Security in Supplier Relationships",
+    "Confidentiality": 2,
+    "Integrity": 2,
+    "Availability": 2,
+    "Max CIA Value": 2,
+    "Vulnerability Rating": 2,
+    "Threat Frequency": 1,
+    "Threat Impact": 1,
+    "Threat Value": 1,
+    "Risk Value": 4,
+    "Planned Mitigation Completion Date": "",
+    "Risk Treatment Action": "",
+    "Revised Vulnerability Rating": "",
+    "Revised Threat Frequency": "",
+    "Revised Threat Impact": "",
+    "Revised Threat Value": "",
+    "Revised Risk Value": "",
+    "Actual Mitigation Completion Date": "",
+    "Risk Treatment Option": "Accept"
+  }
 ];
 
 function fuzzyMatch(required: string, actualHeaders: string[]) {
@@ -190,6 +369,33 @@ export default function RiskAssessmentPage() {
     const srValues = localData.map(item => parseInt(item["Sr#"]) || 0);
     return srValues.length ? Math.max(...srValues) + 1 : 1;
   }
+
+  const handleDownloadTemplate = async () => {
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet("Risk Assessment Template");
+
+    // Add headers
+    worksheet.columns = REQUIRED_HEADERS.map((header) => ({
+      header: header,
+      key: header,
+      width: 20,
+    }));
+
+    // Add example data
+    EXAMPLE_DATA.forEach((data) => {
+      worksheet.addRow(data);
+    });
+
+    // Generate Excel file and trigger download
+    const buffer = await workbook.xlsx.writeBuffer();
+    const blob = new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.setAttribute("download", "risk_assessment_template.xlsx");
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -565,6 +771,14 @@ export default function RiskAssessmentPage() {
                 </div>
               </div>
             )}
+
+            <Button 
+              onClick={handleDownloadTemplate} 
+              className="bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-3 lg:px-4 rounded text-sm"
+            >
+              <span className="hidden lg:inline">Download Template</span>
+              <span className="lg:hidden">Template</span>
+            </Button>
 
             {(isSuperAdmin || isDepartmentHead || isAssessor) && (
               <label className="btn-secondary cursor-pointer text-sm">

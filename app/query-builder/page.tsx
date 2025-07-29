@@ -36,16 +36,19 @@ export default function QueryBuilderPage() {
 
   // Only show data for the reviewer's department
   // (Assume useRiskData is already filtered by department for reviewer/assessor)
-  const columnHeaders = riskData.length > 0 ? Object.keys(riskData[0]) : [];
+  const columnHeaders = riskData.length > 0 
+    ? Object.keys(riskData[0]).filter(
+        (header) =>
+          header !== 'id' && header !== 'department_id' && header !== 'created_at'
+      )
+    : [];
 
   const operators = {
     string: ['=', '!=', 'contains', 'starts with', 'ends with', 'greater than', 'less than'],
     number: ['=', '!=', 'greater than', 'less than', 'greater than or equal to', 'less than or equal to'],
-    date: ['=', '!=', 'greater than', 'less than', 'greater than or equal to', 'less than or equal to'],
-    boolean: ['=', '!='],
   };
 
-  const dataTypes = ['String', 'Number', 'Date', 'Boolean'];
+  // const dataTypes = ['String', 'Number']; // Removed as it's now automated
   const logicalConnectors = ['AND', 'OR'];
 
   useEffect(() => {
@@ -62,7 +65,7 @@ export default function QueryBuilderPage() {
         column: columnHeaders[0] || '',
         operator: '',
         value: '',
-        dataType: 'String',
+        dataType: 'String', // Default to String, but will be updated by logic
         connector: 'AND',
       },
     ]);
@@ -73,7 +76,18 @@ export default function QueryBuilderPage() {
   };
 
   const updateFilter = (id: string, field: string, value: string) => {
-    setFilters(filters.map((f) => (f.id === id ? { ...f, [field]: value } : f)));
+    setFilters(filters.map((f) => {
+      if (f.id === id) {
+        if (field === 'column') {
+          // Attempt to determine data type based on column content
+          const sampleValue = riskData.find(row => row[value] !== undefined)?.[value];
+          const detectedDataType = typeof sampleValue === 'number' ? 'Number' : 'String';
+          return { ...f, [field]: value, dataType: detectedDataType };
+        }
+        return { ...f, [field]: value };
+      }
+      return f;
+    }));
   };
 
   const executeQuery = () => {
@@ -237,6 +251,8 @@ export default function QueryBuilderPage() {
                   onChange={(e) => updateFilter(filter.id, 'value', e.target.value)}
                 />
 
+                {/* Removed the dataType select dropdown */}
+                {/*
                 <select
                   className="border rounded-md p-2 flex-1 min-w-[100px]"
                   value={filter.dataType}
@@ -248,6 +264,7 @@ export default function QueryBuilderPage() {
                     </option>
                   ))}
                 </select>
+                */}
 
                 {index < filters.length - 1 ? (
                   <select
