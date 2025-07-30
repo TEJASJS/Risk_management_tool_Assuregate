@@ -75,10 +75,15 @@ export default function UserManagementPage() {
     setLoading(true);
     setError("");
     try {
-      const { data, error } = await supabase
-        .from("profiles")
-        .select('*')
-        .eq("department_id", departmentId);
+      let query = supabase.from("profiles").select('*');
+
+      if (profile?.role === "department_head" && profile?.department_id) {
+        query = query.eq("department_id", profile.department_id);
+      } else if (departmentId) {
+        query = query.eq("department_id", departmentId);
+      }
+
+      const { data, error } = await query;
       if (error) throw error;
       setUsers(data || []);
     } catch (err: any) {

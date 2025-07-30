@@ -64,35 +64,43 @@ export default function AdminPage() {
     try {
       const counts: {[key: string]: number} = {};
       
-      for (const dept of departments) {
-        const { count, error } = await supabase
-          .from("profiles")
-          .select('id', { count: 'exact', head: true })
-          .eq("department_id", dept.id);
+      // Initialize counts for all departments to 0
+      departments.forEach(dept => {
+        counts[dept.id] = 0;
+      });
+      
+      let query = supabase.from("profiles").select('id, department_id');
 
-        if (error) {
-          console.error("Supabase query error in fetchUserCounts:", error);
-          throw error;
-        }
-        // Direct query to test RLS for all profiles
-        const { data: allProfiles, error: allProfilesError } = await supabase
-          .from('profiles')
-          .select('*');
-
-        if (allProfilesError) {
-          console.error('Error fetching all profiles (RLS test):', allProfilesError);
-          console.log('Supabase error details for all profiles:', allProfilesError);
-        } else {
-          console.log('Successfully fetched all profiles (RLS test):', allProfiles);
-        }
-        counts[dept.id] = count || 0;
+      if (profile?.role === "department_head" && profile?.department_id) {
+        query = query.eq("department_id", profile.department_id);
       }
+
+      const { data: profilesData, error: profilesError } = await query;
+
+      if (profilesError) {
+        console.error("Supabase query error in fetchUserCounts:", profilesError);
+        return; // Early return to prevent ERR_ABORTED errors
+      }
+
+      if (!profilesData) {
+        console.log("No profile data returned");
+        setUserCounts(counts);
+        return;
+      }
+
+      // Count profiles by department_id
+      profilesData.forEach(p => {
+        if (p.department_id && counts.hasOwnProperty(p.department_id)) {
+          counts[p.department_id]++;
+        }
+      });
       
       setUserCounts(counts);
       console.log("Fetched user counts:", counts);
-      console.log("User counts state after update:", userCounts);
     } catch (err: any) {
       console.error("Error fetching user counts:", err.message);
+      // Set empty counts to prevent UI errors
+      setUserCounts({});
     }
   };
 

@@ -1,32 +1,49 @@
 "use client";
-import { useEffect } from "react";
+
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/store/useAuth";
+import LoadingSpinner from "@/components/LoadingSpinner";
 
-export default function ProtectedLayout({ children }: { children: React.ReactNode }) {
+export default function ProtectedLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
   const { user, profile, loading } = useAuth();
   const router = useRouter();
 
-  useEffect(() => {
-    if (!loading) {
-      if (!user) {
-        // No authenticated user, redirect to login
-        router.push("/login");
-      } else if (!profile) {
-        // User is authenticated but no profile found
-        console.warn("User authenticated but no profile found in protected layout");
-        // You can decide to either redirect to a specific page or allow access
-        // For now, we'll allow access but log the warning
-      }
-    }
-  }, [user, profile, loading, router]);
+  const [isClient, setIsClient] = useState(false);
+  const [redirecting, setRedirecting] = useState(false);
 
-  if (loading) {
-    return <div className="min-h-screen flex items-center justify-center text-xl">Loading...</div>;
-  }
-  
-  if (!user) {
-    return <div className="min-h-screen flex items-center justify-center text-xl">Redirecting to login...</div>;
+  // Ensure this only runs on the client to prevent hydration mismatch
+  useEffect(() => {
+    setIsClient(true);
+  }, []);
+
+  // Delay redirect until auth state and profile are fully loaded
+  useEffect(() => {
+    if (!isClient || loading || redirecting) return;
+
+    // Small buffer to allow session restoration before redirect
+    const timer = setTimeout(() => {
+      if (!user && !profile) {
+        setRedirecting(true);
+        console.warn("User not found. Redirecting to login...");
+        router.push("/login");
+      }
+    }, 1000); // wait 1s before checking
+
+    return () => clearTimeout(timer);
+  }, [user, profile, loading, isClient, redirecting, router]);
+
+  // Show loading screen while waiting for session or redirect
+  if (!isClient || loading || redirecting) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <LoadingSpinner size="large" />
+      </div>
+    );
   }
 
   return <>{children}</>;

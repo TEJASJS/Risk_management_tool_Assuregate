@@ -1,6 +1,6 @@
 "use client";
 import { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import supabase from "@/lib/supabaseClient";
 import { useAuth } from "@/store/useAuth";
 import Image from "next/image";
@@ -13,15 +13,27 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [emailError, setEmailError] = useState("");
   const [formValid, setFormValid] = useState(false);
+  const [isClient, setIsClient] = useState(false);
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const returnTo = searchParams.get('returnTo') || '';
   const { user, profile, initializeAuth } = useAuth();
+
+  // Prevent hydration errors by only rendering client-specific content after mount
+  useEffect(() => {
+    setIsClient(true);
+  }, []);
 
   // Check if user and profile are already logged in and loaded
   useEffect(() => {
+    // Only run on client side and when auth state is available
+    if (!isClient) return;
+    
     if (user && profile) {
+      console.log('User already logged in, redirecting based on role');
       redirectBasedOnRole(profile);
     }
-  }, [user, profile, router]);
+  }, [user, profile, router, isClient]);
 
   // Validate form
   useEffect(() => {
@@ -46,6 +58,13 @@ export default function LoginPage() {
       return;
     }
 
+    // If there's a returnTo parameter and it's a relative path, use it
+    if (returnTo && !returnTo.startsWith('http') && !returnTo.startsWith('//')) {
+      console.log(`Redirecting to requested page: ${returnTo}`);
+      router.push(returnTo);
+      return;
+    }
+
     // Redirect by role
     if (profile.role === "super_admin") router.push("/admin");
     else if (profile.role === "department_head") router.push("/dashboard");
@@ -65,30 +84,43 @@ export default function LoginPage() {
     setError("");
     
     try {
+      console.log('Attempting login with email:', email);
       const { data, error: signInError } = await supabase.auth.signInWithPassword({
         email,
         password,
       });
       
       if (signInError || !data.user) {
+        console.error('Login error:', signInError?.message);
         setError(signInError?.message || "Login failed");
         setLoading(false);
         return;
       }
 
+      console.log("Login successful, initializing auth...");
       await initializeAuth(); // Fetch and set user/profile in store
-
+      
       // Get the updated profile from the store after initialization
-      const { profile, user } = useAuth.getState();
-
+      const { profile: currentProfile, user: currentUser } = useAuth.getState();
+      console.log("Auth state after initialization:", { user: !!currentUser, profile: !!currentProfile });
+      
       setLoading(false);
 
-      if (!user) {
+      if (!currentUser) {
         setError("Authentication failed. Please try again.");
         return;
       }
+      
+      // If we have a user but no profile, we should still redirect
+      // This handles the case where the profile fetch fails but authentication succeeds
+      if (currentUser && !currentProfile) {
+        console.log("User authenticated but no profile found. Creating default redirect.");
+        // Redirect to a default page or show a message
+        router.push("/");
+        return;
+      }
 
-      redirectBasedOnRole(profile);
+      redirectBasedOnRole(currentProfile);
     } catch (err) {
       console.error("Error during login process:", err);
       setError("An error occurred during login. Please try again.");

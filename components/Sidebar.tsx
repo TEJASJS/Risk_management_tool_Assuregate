@@ -51,10 +51,19 @@ export default function Sidebar() {
         setIsLoading(true);
         setError(null); // Reset error state before fetching
         
-        const { data, error } = await supabase
+        let query = supabase
           .from('departments')
-          .select('id, name')
-          .order('name');
+          .select('id, name');
+
+        if (profile?.role === 'department_head' && profile?.department_id) {
+          query = query.eq('id', profile.department_id);
+        } else if (profile?.role === 'assessor' && profile?.department_id) {
+          query = query.eq('id', profile.department_id);
+        } else if (profile?.role === 'reviewer' && profile?.department_id) {
+          query = query.eq('id', profile.department_id);
+        }
+
+        const { data, error } = await query.order('name');
 
         if (error) {
           console.error('Error fetching departments:', error);

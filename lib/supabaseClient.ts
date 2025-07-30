@@ -9,7 +9,7 @@ const supabase = createClient(supabaseUrl, supabaseAnonKey, {
     persistSession: true,
     autoRefreshToken: true,
     detectSessionInUrl: true,
-    storageKey: 'risk-management-auth', // Custom storage key for better isolation
+    storageKey: 'supabase.auth.token', // Use standard key for better compatibility
   },
 });
 
