@@ -243,6 +243,7 @@ export default function RiskAssessmentPage() {
   const [selectedDepartment, setSelectedDepartment] = useState<string | null>(null);
   const [departmentName, setDepartmentName] = useState<string>("");
   const [originalData, setOriginalData] = useState<Record<string, any>[]>([]);
+  const [departments, setDepartments] = useState<any[]>([]);
   const { user, profile, loading } = useAuth();
 
   // Redirect to login if not logged in
@@ -285,6 +286,16 @@ export default function RiskAssessmentPage() {
             .single();
           if (departmentData) currentDepartmentName = departmentData.name;
         }
+      }
+
+      // Fetch all departments for super admin fallback
+      const { data: allDepartments, error: deptError } = await supabase
+        .from('departments')
+        .select('id, name');
+      if (deptError) {
+        console.error("Error fetching departments:", deptError);
+      } else {
+        setDepartments(allDepartments || []);
       }
 
       setSelectedDepartment(currentDepartmentId);
@@ -343,7 +354,7 @@ export default function RiskAssessmentPage() {
   );
 
   // Filter headers to exclude ID fields and created_at
-  const displayHeaders = headers.filter(header => 
+  const displayHeaders = headers.filter(header =>
     !['id', 'department_id', 'Id', 'Department_id', 'ID', 'DEPARTMENT_ID', 'created_at', 'Created_at', 'CREATED_AT'].includes(header)
   );
 
@@ -401,10 +412,10 @@ export default function RiskAssessmentPage() {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    // Only Super Admin and Department Head can upload files
-    if (!isSuperAdmin && !isDepartmentHead) {
+    // Only Super Admin, Department Head, and Assessor can upload files
+    if (!isSuperAdmin && !isDepartmentHead && profile?.role !== 'assessor') {
       setUploadError("You do not have permission to upload files.");
-      
+
       // Auto-dismiss error after 5 seconds
       setTimeout(() => {
         setUploadError(null);
@@ -414,14 +425,14 @@ export default function RiskAssessmentPage() {
       }
       return;
     }
-  
+
     const fileName = file.name.toLowerCase();
     const isExcel = fileName.endsWith('.xlsx') || fileName.endsWith('.xls');
     const isCSV = fileName.endsWith('.csv');
-  
+
     if (!isExcel && !isCSV) {
       setUploadError("Invalid file type. Please upload a CSV or Excel file.");
-      
+
       // Auto-dismiss error after 5 seconds
       setTimeout(() => {
         setUploadError(null);
@@ -432,28 +443,28 @@ export default function RiskAssessmentPage() {
       }
       return;
     }
-  
+
     const processData = (parsed: Record<string, any>[]) => {
       const keys = Object.keys(parsed[0] || {});
       const missing = REQUIRED_HEADERS.filter(req => !fuzzyMatch(req, keys));
       if (missing.length > 0) {
         setUploadError(`Cannot upload file. Missing columns: [${missing.map(m => `"${m}"`).join(", ")}]`);
-          
-          // Auto-dismiss error after 5 seconds
-          setTimeout(() => {
-            setUploadError(null);
-          }, 5000);
+
+        // Auto-dismiss error after 5 seconds
+        setTimeout(() => {
+          setUploadError(null);
+        }, 5000);
         return;
       }
-  
+
       setUploadError(null);
-      
+
       // Process rows based on risk_owner column
       let processedRows = parsed;
-      
+
       // Find the risk_owner column (might be different casing)
       const riskOwnerKey = keys.find(key => key.toLowerCase() === 'risk owner') || 'Risk Owner';
-      
+
       // If not super_admin, validate risk_owner against user's department name
       if (profile?.role !== 'super_admin' && departmentName) {
         const nonMatchingRows = parsed.filter(row => {
@@ -479,7 +490,7 @@ export default function RiskAssessmentPage() {
         }, 5000);
         return;
       }
-      
+
       // Continue with processed rows
       if (!processedRows[0]?.["Sr#"]) {
         processedRows = processedRows.map((row, idx) => ({
@@ -493,12 +504,12 @@ export default function RiskAssessmentPage() {
           ["Sr#"]: (offset + idx).toString(),
         }));
       }
-  
+
       if (uploadMode === "append") {
         const existingRows = localData;
         const newRows: Record<string, any>[] = [];
         const duplicates: Record<string, any>[] = [];
-  
+
         processedRows.forEach(row => {
           const isDuplicate = existingRows.some(existing => isDuplicateRow(existing, row));
           if (isDuplicate) {
@@ -541,7 +552,7 @@ export default function RiskAssessmentPage() {
 
       setCurrentPage(1);
     }
-  
+
     if (isExcel) {
       const reader = new FileReader();
       reader.onload = (e) => {
@@ -554,11 +565,11 @@ export default function RiskAssessmentPage() {
           processData(parsed as Record<string, any>[]);
         } catch (error) {
           setUploadError("Error reading Excel file. Please check the file format.");
-        
-        // Auto-dismiss error after 5 seconds
-        setTimeout(() => {
-          setUploadError(null);
-        }, 5000);
+
+          // Auto-dismiss error after 5 seconds
+          setTimeout(() => {
+            setUploadError(null);
+          }, 5000);
         }
       }; // Closing brace for the catch block
       reader.readAsArrayBuffer(file);
@@ -572,41 +583,101 @@ export default function RiskAssessmentPage() {
       });
     }
   }
+  const [showDeleteConfirmation, setShowDeleteConfirmation] = useState(false);
+
   const handleDeleteCSV = () => {
-    setLocalData([]);
-    setData([]);
-    setHeaders([]);
-    setCurrentPage(1);
-    // Reset file input after successful processing
-    if (fileInputRef.current) {
-      fileInputRef.current.value = "";
+    // Show confirmation dialog
+    setShowDeleteConfirmation(true);
+  };
+
+  const confirmDelete = async () => {
+    try {
+      // First, determine the department ID based on user role
+      let departmentId = selectedDepartment;
+
+      // For assessors and department heads, use their assigned department
+      if ((profile?.role === 'assessor' || profile?.role === 'department_head') && profile?.department_id) {
+        departmentId = profile.department_id;
+      } else if (profile?.role === 'super_admin') {
+        for (const dept of departments) {
+          const { error: deleteError } = await supabase
+            .from('risks')
+            .delete()
+            .eq('department_id', dept.id);
+
+          if (deleteError) {
+            console.error('Error deleting risks:', deleteError);
+            throw deleteError;
+          }
+        }
+      }
+
+      // Delete data from database for the current login's department
+      if (departmentId) {
+        const { error: deleteError } = await supabase
+          .from('risks')
+          .delete()
+          .eq('department_id', departmentId);
+
+        if (deleteError) {
+          console.error('Error deleting risks from database:', deleteError);
+          throw deleteError;
+        }
+      }
+
+      // Clear local data
+      setLocalData([]);
+      setData([]);
+      setHeaders([]);
+      setCurrentPage(1);
+      // Reset file input after successful processing
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
+
+      // Show success message
+      setSaveSuccess(true);
+      setTimeout(() => setSaveSuccess(false), 3000); // Hide after 3 seconds
+
+      // Close confirmation dialog
+      setShowDeleteConfirmation(false);
+    } catch (error) {
+      console.error('Error during delete operation:', error);
+      // Close confirmation dialog even if there's an error
+      setShowDeleteConfirmation(false);
     }
-    
-    // Show success message
-    setSaveSuccess(true);
-    setTimeout(() => setSaveSuccess(false), 3000); // Hide after 3 seconds
+  };
+
+  const cancelDelete = () => {
+    // Close confirmation dialog without deleting
+    setShowDeleteConfirmation(false);
+  };
+
+  const cancelSave = () => {
+    // Close confirmation dialog without saving
+    setShowSaveConfirmation(false);
   };
 
   const exportToCSV = () => {
     if (filteredData.length === 0) return;
-    
+
     // Prepare filename with department name if available
     let filename = "risk_assessment";
     if (departmentName) {
       filename += `_${departmentName.replace(/\s+/g, '_').toLowerCase()}`;
     }
     filename += `_${new Date().toISOString().split('T')[0]}.csv`;
-    
+
     // Filter out any internal fields before export
     const exportData = filteredData.map(row => {
-      const filteredRow = {...row};
+      const filteredRow = { ...row };
       // Remove internal fields
       ['id', 'Id', 'ID', 'department_id', 'created_at', 'updated_at'].forEach(field => {
         delete filteredRow[field];
       });
       return filteredRow;
     });
-    
+
     const csv = Papa.unparse(exportData);
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
     const link = document.createElement("a");
@@ -615,43 +686,198 @@ export default function RiskAssessmentPage() {
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
-    
+
     // Show success message
     setExportSuccess(`CSV exported successfully (${exportData.length} records)`);
     setTimeout(() => setExportSuccess(null), 3000); // Hide after 3 seconds
   };
-  
+
   // Add Excel export functionality
   const exportToExcel = () => {
     if (filteredData.length === 0) return;
-    
+
     // Prepare filename with department name if available
     let filename = "risk_assessment";
     if (departmentName) {
       filename += `_${departmentName.replace(/\s+/g, '_').toLowerCase()}`;
     }
     filename += `_${new Date().toISOString().split('T')[0]}.xlsx`;
-    
+
     // Filter out any internal fields before export
     const exportData = filteredData.map(row => {
-      const filteredRow = {...row};
+      const filteredRow = { ...row };
       // Remove internal fields
       ['id', 'Id', 'ID', 'department_id', 'created_at', 'updated_at'].forEach(field => {
         delete filteredRow[field];
       });
       return filteredRow;
     });
-    
+
     const worksheet = XLSX.utils.json_to_sheet(exportData);
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, "Risks");
-    
+
     // Generate Excel file and trigger download
     XLSX.writeFile(workbook, filename);
-    
+
     // Show success message
     setExportSuccess(`Excel exported successfully (${exportData.length} records)`);
     setTimeout(() => setExportSuccess(null), 3000); // Hide after 3 seconds
+  };
+
+  // State for save confirmation dialog
+  const [showSaveConfirmation, setShowSaveConfirmation] = useState(false);
+
+  // Function to handle direct saving - now shows confirmation dialog first
+  const handleDirectSave = () => {
+    // Show confirmation dialog
+    setShowSaveConfirmation(true);
+  };
+
+  // Function to confirm save after confirmation dialog
+  const confirmSave = async () => {
+    try {
+      // Determine the department ID based on user role
+      let departmentId = selectedDepartment;
+
+      // For assessors and department heads, use their assigned department
+      if ((profile?.role === 'assessor' || profile?.role === 'department_head') && profile?.department_id) {
+        departmentId = profile.department_id;
+      } else if (!departmentId && departments.length > 0) {
+        // For super admins with no selected department, use the first available department
+        departmentId = departments[0].id;
+      }
+
+      if (!departmentId) {
+        // If no department is available, show the modal as fallback
+        setShowSaveModal(true);
+        setShowSaveConfirmation(false);
+        return;
+      }
+
+      // Sanitize the risk data for Supabase compatibility
+      const sanitizedRiskData = sanitizeDataForSupabase(localData);
+
+      // For super admin, ensure each risk gets the correct department ID based on risk owner
+      const risksToProcess = sanitizedRiskData.map(risk => {
+        // If super admin and risk has a risk_owner field
+        if (profile?.role === 'super_admin' && risk.risk_owner) {
+          // Try to find a department that matches the risk owner's department
+          const ownerDepartment = departments.find(dept =>
+            risk.risk_owner.toLowerCase().includes(dept.name.toLowerCase())
+          );
+
+          // If found a matching department, use that department's ID
+          if (ownerDepartment) {
+            return {
+              ...risk,
+              department_id: ownerDepartment.id
+            };
+          }
+        }
+
+        // Default case: use the selected department ID
+        return {
+          ...risk,
+          department_id: departmentId
+        };
+      });
+
+      // Separate risks with IDs (existing) from those without (new)
+      const existingRisks = risksToProcess.filter(risk => risk.id);
+      const newRisks = risksToProcess.filter(risk => !risk.id);
+
+      // Find deleted risks by comparing original data with current data
+      // Only consider risks that have IDs (were previously in the database)
+      const originalRiskIds = originalData
+        .filter(risk => risk.id)
+        .map(risk => risk.id);
+
+      const currentRiskIds = existingRisks.map(risk => risk.id);
+
+      // Determine which risks have been deleted (in original but not in current)
+      const deletedRiskIds = originalRiskIds.filter(
+        id => !currentRiskIds.includes(id)
+      );
+
+      // Delete risks that have been removed in the UI
+      if (deletedRiskIds.length > 0) {
+        for (const id of deletedRiskIds) {
+          const { error: deleteError } = await supabase
+            .from('risks')
+            .delete()
+            .eq('id', id);
+
+          if (deleteError) {
+            console.error('Error deleting risk:', deleteError);
+            throw deleteError;
+          }
+        }
+      }
+
+      // Update existing risks individually (not in bulk)
+      for (const risk of existingRisks) {
+        const { error: updateError } = await supabase
+          .from('risks')
+          .update(risk)
+          .eq('id', risk.id);
+
+        if (updateError) {
+          console.error('Error updating risk:', updateError);
+          throw updateError;
+        }
+      }
+
+      // Insert new risks if any
+      if (newRisks.length > 0) {
+        const { error: insertError } = await supabase
+          .from('risks')
+          .insert(newRisks);
+
+        if (insertError) {
+          console.error('Error inserting new risks:', insertError);
+          throw insertError;
+        }
+      }
+
+      // Show success message
+      setSaveSuccess(true);
+
+      // Close the confirmation dialog
+      setShowSaveConfirmation(false);
+
+      // Refresh data from database to show updated state
+      if (departmentId) {
+        try {
+          const { data: riskData } = await supabase
+            .from('risks')
+            .select('*')
+            .eq('department_id', departmentId)
+            .order('sr_no');
+
+          if (riskData && riskData.length > 0) {
+            const mappedData = riskData.map(item => mapDbColumnsToCsvData(item));
+            setLocalData(mappedData);
+            setData(mappedData);
+            setHeaders(Object.keys(mappedData[0]));
+            setOriginalData(mappedData); // Update original data
+          }
+        } catch (error) {
+          console.error('Error refreshing data:', error);
+        }
+      }
+
+      setTimeout(() => {
+        setSaveSuccess(false);
+      }, 3000);
+
+    } catch (error: any) {
+      console.error('Error saving risks:', error);
+      // Close the confirmation dialog
+      setShowSaveConfirmation(false);
+      // If direct save fails, show the modal as fallback
+      setShowSaveModal(true);
+    }
   };
 
 
@@ -665,7 +891,7 @@ export default function RiskAssessmentPage() {
             <div className="flex items-center">
               <p className="text-slate-600">Viewing risks for department: </p>
               <span className="ml-1 font-semibold text-blue-600">{departmentName}</span>
-              <button 
+              <button
                 onClick={() => {
                   setSelectedDepartment(null);
                   setDepartmentName("");
@@ -693,7 +919,7 @@ export default function RiskAssessmentPage() {
             <span className="block sm:inline">Data cleared successfully!</span>
           </div>
         )}
-        
+
         {exportSuccess && (
           <div className="fixed bottom-4 right-4 bg-blue-50 border-l-4 border-blue-500 text-blue-700 p-4 rounded shadow-md z-50 fade-in">
             <div className="flex items-center">
@@ -707,8 +933,8 @@ export default function RiskAssessmentPage() {
                 <p className="text-sm">{exportSuccess}</p>
               </div>
               <div className="ml-auto">
-                <button 
-                  className="text-blue-700 hover:text-blue-900" 
+                <button
+                  className="text-blue-700 hover:text-blue-900"
                   onClick={() => setExportSuccess(null)}
                 >
                   <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
@@ -719,21 +945,21 @@ export default function RiskAssessmentPage() {
             </div>
           </div>
         )}
-        
+
         {uploadError && (
           <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-2 rounded relative mb-4" role="alert">
             <span className="block sm:inline">{uploadError}</span>
           </div>
         )}
-        
+
         <div className="w-full">
           <Search value={searchQuery} onChange={setSearchQuery} />
         </div>
 
         <div className="flex flex-col sm:flex-row sm:flex-wrap gap-2 lg:gap-3 items-center justify-between">
           {(isSuperAdmin || isDepartmentHead || isAssessor) && (
-            <button 
-              onClick={() => setShowCreateModal(true)} 
+            <button
+              onClick={() => setShowCreateModal(true)}
               className="btn-primary text-sm w-full sm:w-auto"
               suppressHydrationWarning={true}
             >
@@ -747,22 +973,22 @@ export default function RiskAssessmentPage() {
                 <span className="text-slate-700 font-medium hidden lg:inline">Upload Mode:</span>
                 <div className="flex bg-gray-100 rounded-lg p-1">
                   <label className="inline-flex items-center gap-1 px-2 py-1 rounded-md cursor-pointer transition-colors hover:bg-gray-200">
-                    <input 
-                      type="radio" 
-                      name="uploadMode" 
-                      value="replace" 
-                      checked={uploadMode === 'replace'} 
+                    <input
+                      type="radio"
+                      name="uploadMode"
+                      value="replace"
+                      checked={uploadMode === 'replace'}
                       onChange={() => setUploadMode('replace')}
                       className="text-blue-600 focus:ring-blue-500"
                     />
                     <span className={`text-xs font-medium ${uploadMode === 'replace' ? 'text-blue-600' : 'text-gray-600'}`}>Replace</span>
                   </label>
                   <label className="inline-flex items-center gap-1 px-2 py-1 rounded-md cursor-pointer transition-colors hover:bg-gray-200">
-                    <input 
-                      type="radio" 
-                      name="uploadMode" 
-                      value="append" 
-                      checked={uploadMode === 'append'} 
+                    <input
+                      type="radio"
+                      name="uploadMode"
+                      value="append"
+                      checked={uploadMode === 'append'}
                       onChange={() => setUploadMode('append')}
                       className="text-blue-600 focus:ring-blue-500"
                     />
@@ -772,8 +998,8 @@ export default function RiskAssessmentPage() {
               </div>
             )}
 
-            <Button 
-              onClick={handleDownloadTemplate} 
+            <Button
+              onClick={handleDownloadTemplate}
               className="bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-3 lg:px-4 rounded text-sm"
             >
               <span className="hidden lg:inline">Download Template</span>
@@ -782,12 +1008,12 @@ export default function RiskAssessmentPage() {
 
             {(isSuperAdmin || isDepartmentHead || isAssessor) && (
               <label className="btn-secondary cursor-pointer text-sm">
-                <input 
+                <input
                   ref={fileInputRef}
-                  type="file" 
-                  accept=".csv,.xlsx,.xls" 
-                  onChange={handleFileUpload} 
-                  className="hidden" 
+                  type="file"
+                  accept=".csv,.xlsx,.xls"
+                  onChange={handleFileUpload}
+                  className="hidden"
                 />
                 <span className="hidden lg:inline">📁 Upload CSV/Excel</span>
                 <span className="lg:hidden">📁 Upload</span>
@@ -812,9 +1038,9 @@ export default function RiskAssessmentPage() {
               </button>
             </div>
             {(isSuperAdmin || isDepartmentHead || isAssessor) && (
-              <button 
-                onClick={() => setShowSaveModal(true)} 
-                className="bg-green-600 hover:bg-green-700 text-white font-medium py-2 px-3 lg:px-4 rounded text-sm" 
+              <button
+                onClick={handleDirectSave} // Changed from setShowSaveModal(true) to handleDirectSave
+                className="bg-green-600 hover:bg-green-700 text-white font-medium py-2 px-3 lg:px-4 rounded text-sm"
                 disabled={filteredData.length === 0}
               >
                 <span className="hidden lg:inline">Save to Database</span>
@@ -913,8 +1139,8 @@ export default function RiskAssessmentPage() {
                       <td className="px-2 py-3 border-r border-gray-100">
                         <div className="flex flex-col gap-1">
                           {(isSuperAdmin || isDepartmentHead || isAssessor) && ( // Only super_admin, department_head, and assessor can edit risks
-                            <button 
-                              className="text-blue-600 hover:text-blue-800 transition-colors p-1 rounded hover:bg-blue-50" 
+                            <button
+                              className="text-blue-600 hover:text-blue-800 transition-colors p-1 rounded hover:bg-blue-50"
                               onClick={() => {
                                 setEditingRisk(row);
                                 setShowEditModal(true);
@@ -927,41 +1153,41 @@ export default function RiskAssessmentPage() {
                             </button>
                           )}
                           {(isSuperAdmin || isDepartmentHead || isAssessor) && ( // Only super_admin, department_head, and assessor can delete risks
-                            <button 
-                              className="text-red-600 hover:text-red-800 transition-colors p-1 rounded hover:bg-red-50" 
+                            <button
+                              className="text-red-600 hover:text-red-800 transition-colors p-1 rounded hover:bg-red-50"
                               onClick={() => {
                                 // Calculate the actual index in the full dataset
                                 const actualIndex = localData.findIndex(item => item["Sr#"] === row["Sr#"]);
-                                
+
                                 if (actualIndex !== -1) {
                                   // Remove the item from local data
                                   let updated = localData.filter((_, i) => i !== actualIndex);
-                                  
+
                                   // Recalculate serial numbers for all items to be consecutive
                                   updated = updated.map((item, idx) => ({
                                     ...item,
                                     "Sr#": (idx + 1).toString()
                                   }));
-                                  
+
                                   setLocalData(updated);
                                   setData(updated);
-                                  
+
                                   // If we're on a page that no longer has data, go to previous page
                                   const newTotalPages = Math.ceil(updated.length / ITEMS_PER_PAGE);
                                   if (currentPage > newTotalPages && newTotalPages > 0) {
                                     setCurrentPage(newTotalPages);
                                   }
                                 }
-                                
+
                                 // Note: Database changes will be applied when user clicks "Save to Database"
                               }}
                               title="Delete Risk"
                             >
                               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                                </svg>
-                              </button>
-                            )}
+                              </svg>
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -1003,11 +1229,10 @@ export default function RiskAssessmentPage() {
                       <button
                         key={page}
                         onClick={() => setCurrentPage(page)}
-                        className={`px-3 py-1 text-sm rounded border transition-colors ${
-                          currentPage === page
+                        className={`px-3 py-1 text-sm rounded border transition-colors ${currentPage === page
                             ? 'bg-blue-600 text-white border-blue-600 shadow-sm'
                             : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-100'
-                        }`}
+                          }`}
                       >
                         {page}
                       </button>
@@ -1034,8 +1259,8 @@ export default function RiskAssessmentPage() {
           <h3 className="text-xl font-semibold mb-2">No Data Available</h3>
           <p className="text-slate-500">Upload a CSV or Excel file or create your first risk assessment to get started.</p>
           {(isSuperAdmin || isDepartmentHead || isAssessor) && (
-            <button 
-              onClick={() => setShowCreateModal(true)} 
+            <button
+              onClick={() => setShowCreateModal(true)}
               className="btn-primary mt-4"
               suppressHydrationWarning={true}
             >
@@ -1054,35 +1279,35 @@ export default function RiskAssessmentPage() {
       )}
 
       {showCreateModal && (
-        <RiskFormModal 
-          onClose={() => setShowCreateModal(false)} 
+        <RiskFormModal
+          onClose={() => setShowCreateModal(false)}
           selectedDepartmentId={selectedDepartment}
           onSave={(newRisk) => {
             const srNumber = getNextSrNumber();
-            const riskWithMetadata = { 
-              ...newRisk, 
+            const riskWithMetadata = {
+              ...newRisk,
               ["Sr#"]: srNumber.toString(),
               // Don't add database ID for new risks - let the database generate it
               ...(selectedDepartment && { department_id: selectedDepartment })
             };
-            
+
             const updated = [...localData, riskWithMetadata];
             setLocalData(updated);
             setData(updated);
-            
+
             // Note: Database changes will be applied when user clicks "Save to Database"
-          }} 
+          }}
         />
       )}
 
       {showEditModal && editingRisk && (
-        <RiskFormModal 
-          initialData={editingRisk} 
+        <RiskFormModal
+          initialData={editingRisk}
           selectedDepartmentId={selectedDepartment}
           onClose={() => {
             setEditingRisk(null);
             setShowEditModal(false);
-          }} 
+          }}
           onSave={(updatedRisk) => {
             // Preserve the original ID and other metadata when updating
             const riskId = editingRisk.id || editingRisk.Id || editingRisk.ID;
@@ -1092,7 +1317,7 @@ export default function RiskAssessmentPage() {
               "Sr#": editingRisk["Sr#"], // Keep the same serial number
               ...(selectedDepartment && { department_id: selectedDepartment })
             };
-            
+
             // Find and update the exact row
             const index = localData.findIndex((r) => r["Sr#"] === editingRisk["Sr#"]);
             if (index !== -1) {
@@ -1101,9 +1326,9 @@ export default function RiskAssessmentPage() {
               setLocalData(updated);
               setData(updated);
             }
-            
+
             // Note: Database changes will be applied when user clicks "Save to Database"
-          }} 
+          }}
         />
       )}
 
@@ -1120,8 +1345,8 @@ export default function RiskAssessmentPage() {
               <p className="text-sm">{uploadError}</p>
             </div>
             <div className="ml-auto">
-              <button 
-                className="text-red-700 hover:text-red-900" 
+              <button
+                className="text-red-700 hover:text-red-900"
                 onClick={() => setUploadError(null)}
               >
                 <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
@@ -1149,8 +1374,8 @@ export default function RiskAssessmentPage() {
               </p>
             </div>
             <div className="ml-auto">
-              <button 
-                className="text-yellow-700 hover:text-yellow-900" 
+              <button
+                className="text-yellow-700 hover:text-yellow-900"
                 onClick={() => { setDuplicateRows([]); setDuplicateInfo(null); }}
               >
                 <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
@@ -1163,12 +1388,12 @@ export default function RiskAssessmentPage() {
       )}
 
       {showSaveModal && (
-        <SaveRiskModal 
-          onClose={() => setShowSaveModal(false)} 
+        <SaveRiskModal
+          onClose={() => setShowSaveModal(false)}
           onSuccess={async () => {
             setShowSaveModal(false);
             setSaveSuccess(true);
-            
+
             // Refresh data from database to show updated state
             if (selectedDepartment) {
               try {
@@ -1189,13 +1414,79 @@ export default function RiskAssessmentPage() {
                 console.error('Error refreshing data:', error);
               }
             }
-            
+
             setTimeout(() => {
               setSaveSuccess(false);
             }, 3000);
           }}
           riskData={localData}
+          onSmartSave={async (departmentId, data) => {
+            // Sanitize the risk data for Supabase compatibility
+            const sanitizedRiskData = sanitizeDataForSupabase(data);
 
+            // Add department_id to each record
+            const risksToProcess = sanitizedRiskData.map(risk => ({
+              ...risk,
+              department_id: departmentId
+            }));
+
+            // Separate risks with IDs (existing) from those without (new)
+            const existingRisks = risksToProcess.filter(risk => risk.id);
+            const newRisks = risksToProcess.filter(risk => !risk.id);
+
+            // Find deleted risks by comparing original data with current data
+            // Only consider risks that have IDs (were previously in the database)
+            const originalRiskIds = originalData
+              .filter(risk => risk.id)
+              .map(risk => risk.id);
+
+            const currentRiskIds = existingRisks.map(risk => risk.id);
+
+            // Determine which risks have been deleted (in original but not in current)
+            const deletedRiskIds = originalRiskIds.filter(
+              id => !currentRiskIds.includes(id)
+            );
+
+            // Delete risks that have been removed in the UI
+            if (deletedRiskIds.length > 0) {
+              for (const id of deletedRiskIds) {
+                const { error: deleteError } = await supabase
+                  .from('risks')
+                  .delete()
+                  .eq('id', id);
+
+                if (deleteError) {
+                  console.error('Error deleting risk:', deleteError);
+                  throw deleteError;
+                }
+              }
+            }
+
+            // Update existing risks individually (not in bulk)
+            for (const risk of existingRisks) {
+              const { error: updateError } = await supabase
+                .from('risks')
+                .update(risk)
+                .eq('id', risk.id);
+
+              if (updateError) {
+                console.error('Error updating risk:', updateError);
+                throw updateError;
+              }
+            }
+
+            // Insert new risks if any
+            if (newRisks.length > 0) {
+              const { error: insertError } = await supabase
+                .from('risks')
+                .insert(newRisks);
+
+              if (insertError) {
+                console.error('Error inserting new risks:', insertError);
+                throw insertError;
+              }
+            }
+          }}
         />
       )}
 
@@ -1212,13 +1503,61 @@ export default function RiskAssessmentPage() {
               <p className="text-sm">Risk data saved to database successfully.</p>
             </div>
             <div className="ml-auto">
-              <button 
-                className="text-green-700 hover:text-green-900" 
+              <button
+                className="text-green-700 hover:text-green-900"
                 onClick={() => setSaveSuccess(false)}
               >
                 <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
                   <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
                 </svg>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Confirmation Dialog */}
+      {showDeleteConfirmation && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[500]">
+          <div className="bg-white rounded-lg p-6 max-w-md w-full">
+            <h2 className="text-xl font-bold mb-4">Confirm Delete</h2>
+            <p className="mb-6">Are you sure you want to delete all data for your department from the database? This action cannot be undone.</p>
+            <div className="flex justify-end space-x-3">
+              <button
+                onClick={cancelDelete}
+                className="px-4 py-2 bg-gray-200 hover:bg-gray-300 rounded-md text-gray-800"
+              >
+                No, Cancel
+              </button>
+              <button
+                onClick={confirmDelete}
+                className="px-4 py-2 bg-red-600 hover:bg-red-700 rounded-md text-white"
+              >
+                Yes, Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Save Confirmation Dialog */}
+      {showSaveConfirmation && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[500]">
+          <div className="bg-white rounded-lg p-6 max-w-md w-full">
+            <h2 className="text-xl font-bold mb-4">Confirm Save</h2>
+            <p className="mb-6">Are you sure you want to save all data to the database? This will update existing records and add new ones.</p>
+            <div className="flex justify-end space-x-3">
+              <button
+                onClick={cancelSave}
+                className="px-4 py-2 bg-gray-200 hover:bg-gray-300 rounded-md text-gray-800"
+              >
+                No, Cancel
+              </button>
+              <button
+                onClick={confirmSave}
+                className="px-4 py-2 bg-green-600 hover:bg-green-700 rounded-md text-white"
+              >
+                Yes, Save
               </button>
             </div>
           </div>

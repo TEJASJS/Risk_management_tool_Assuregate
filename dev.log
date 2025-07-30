@@ -1,0 +1,23 @@
+ ⚠ Port 3000 is in use, using available port 3001 instead.
+   ▲ Next.js 15.3.4
+   - Local:        http://localhost:3001
+   - Network:      http://192.168.17.187:3001
+   - Environments: .env.local
+
+ ✓ Starting...
+node:events:492
+      throw er; // Unhandled 'error' event
+      ^
+
+Error: EPERM: operation not permitted, open 'C:\Users\tejas\OneDrive\Desktop\Tool_final\risk-management-tool\.next\trace'
+Emitted 'error' event on WriteStream instance at:
+    at emitErrorNT (node:internal/streams/destroy:151:8)
+    at emitErrorCloseNT (node:internal/streams/destroy:116:3)
+    at process.processTicksAndRejections (node:internal/process/task_queues:82:21) {
+  errno: -4048,
+  code: 'EPERM',
+  syscall: 'open',
+  path: 'C:\\Users\\tejas\\OneDrive\\Desktop\\Tool_final\\risk-management-tool\\.next\\trace'
+}
+
+Node.js v20.9.0

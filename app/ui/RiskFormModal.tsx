@@ -109,9 +109,20 @@ export default function RiskFormModal({
   const [uploadError, setUploadError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (data.length > 0 && Object.keys(formData).length === 0) {
-      const exclude = ["Max CIA Value", "Threat Value", "Risk Value", "Sr#", "id", "department_id", "Id", "Department_id", "ID", "DEPARTMENT_ID"];
-      const allCols = Object.keys(data[0]).filter((col) => !exclude.includes(col));
+    if (Object.keys(formData).length === 0) {
+      let allCols: string[] = [];
+      
+      // If we have existing data, use its structure
+      if (data.length > 0) {
+        const exclude = ["Max CIA Value", "Threat Value", "Risk Value", "Sr#", "id", "department_id", "Id", "Department_id", "ID", "DEPARTMENT_ID"];
+        allCols = Object.keys(data[0]).filter((col) => !exclude.includes(col));
+      } else {
+        // If no existing data, use the REQUIRED_HEADERS
+        allCols = REQUIRED_HEADERS.filter(header => 
+          !["Max CIA Value", "Threat Value", "Risk Value", "Sr#", "id", "department_id", "Id", "Department_id", "ID", "DEPARTMENT_ID"].includes(header)
+        );
+      }
+      
       setColumns(allCols);
 
       const initState: Record<string, any> = {};
@@ -120,7 +131,7 @@ export default function RiskFormModal({
       });
       setFormData(initState);
     }
-  }, [data]);
+  }, [data, initialData]);
 
   const getNum = (value: any) => {
     if (typeof value === "string") {

@@ -23,9 +23,11 @@ export default function SaveRiskModal({ onClose, onSuccess, riskData, onSmartSav
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<boolean>(false);
+  const [showConfirmDialog, setShowConfirmDialog] = useState<boolean>(false);
+  const [actionToConfirm, setActionToConfirm] = useState<(() => Promise<void>) | null>(null);
 
   // Fetch departments from Supabase
-  useEffect(() => {
+  useEffect(() =>{
     const fetchDepartments = async () => {
       try {
         let query = supabase.from('departments').select('id, name').order('name');
@@ -52,9 +54,14 @@ export default function SaveRiskModal({ onClose, onSuccess, riskData, onSmartSav
   }, [profile]);
 
   const handleSave = async () => {
-    setIsLoading(true);
     setError(null);
-    
+    setShowConfirmDialog(true);
+    setActionToConfirm(() => confirmSave);
+  };
+
+  const confirmSave = async () => {
+    setShowConfirmDialog(false);
+    setIsLoading(true);
     try {
       let departmentId = selectedDepartment;
 
@@ -182,6 +189,35 @@ export default function SaveRiskModal({ onClose, onSuccess, riskData, onSmartSav
             </div>
           )}
 
+          {showConfirmDialog && (
+            <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[500]">
+              <div className="bg-white p-6 rounded-lg shadow-xl max-w-sm w-full text-center">
+                <h3 className="text-lg font-bold mb-4">Confirm Save</h3>
+                <p className="mb-6">Are you sure you want to save this data to the database?</p>
+                <div className="flex justify-center gap-4">
+                  <button
+                    onClick={() => {
+                      if (actionToConfirm) actionToConfirm();
+                      setShowConfirmDialog(false);
+                    }}
+                    className="px-5 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors duration-200"
+                  >
+                    Yes, Save
+                  </button>
+                  <button
+                    onClick={() => {
+                      setShowConfirmDialog(false);
+                      setIsLoading(false); // Reset loading state if cancelled
+                    }}
+                    className="px-5 py-2 bg-gray-300 text-gray-800 rounded-md hover:bg-gray-400 transition-colors duration-200"
+                  >
+                    No, Cancel
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
           <div className="space-y-4">
             {(profile?.role === 'assessor' || profile?.role === 'department_head') ? (
               <div className="mb-4 p-3 bg-blue-50 border border-blue-200 text-blue-700 rounded-lg">
@@ -263,13 +299,16 @@ export default function SaveRiskModal({ onClose, onSuccess, riskData, onSmartSav
           >
             Cancel
           </button>
-          <button
-            onClick={handleSave}
-            disabled={isLoading || (profile?.role !== 'assessor' && (!selectedDepartment && !isNewDepartment || (isNewDepartment && !newDepartment.trim())))}
-            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 focus:ring-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {isLoading ? 'Saving...' : 'Save'}
-          </button>
+            <button
+              onClick={handleSave}
+              disabled={isLoading || (isNewDepartment && !newDepartment.trim()) || (!isNewDepartment && !selectedDepartment)}
+              className={`w-full py-3 rounded-lg text-white font-semibold transition-colors duration-200
+                ${isLoading || (isNewDepartment && !newDepartment.trim()) || (!isNewDepartment && !selectedDepartment)
+                  ? 'bg-gray-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'}
+              `}
+            >
+              {isLoading ? 'Saving...' : 'Save to Database'}
+            </button>
         </div>
       </div>
     </div>
